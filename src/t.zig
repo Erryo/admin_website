@@ -9,8 +9,45 @@ const Authenticator = zap.Auth.UserPassSession(
 );
 
 const loginpath = "/login";
+const loginpage =
+    \\<html>
+    \\<body>
+    \\  <form method="POST" action="/login">
+    \\    <input name="username" placeholder="username">
+    \\    <input name="password" type="password" placeholder="password">
+    \\    <button type="submit">Login</button>
+    \\  </form>
+    \\</body>
+    \\</html>
+;
 
 var authenticator: Authenticator = undefined;
+
+fn on_login(r: zap.Request) !void {
+    try r.sendBody(loginpage);
+}
+
+fn on_logout(r: zap.Request) !void {
+    try r.sendBody(
+        \\<html>
+        \\<body>
+        \\  <p>Logged out.</p>
+        \\  <a href="/">Login again</a>
+        \\</body>
+        \\</html>
+    );
+}
+
+fn on_protected_page(r: zap.Request) !void {
+    try r.sendBody(
+        \\<html>
+        \\<body>
+        \\  <h1>You are logged in</h1>
+        \\  <a href="/logout">Logout</a>
+        \\</body>
+        \\</html>
+    );
+}
 
 fn on_request(r: zap.Request) !void {
     switch (authenticator.authenticateRequest(&r)) {
@@ -25,14 +62,14 @@ fn on_request(r: zap.Request) !void {
             const path = r.path orelse "/";
 
             if (std.mem.startsWith(u8, path, loginpath)) {
-                // serve page
+                return on_login(r);
             }
 
             if (std.mem.startsWith(u8, path, "/logout")) {
-                // serve page;
+                return on_logout(r);
             }
 
-            return; // serve page
+            return on_protected_page(r);
         },
     }
 }

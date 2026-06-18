@@ -1,5 +1,6 @@
 const std = @import("std");
 const zap = @import("zap");
+const log = std.log;
 
 const Lookup = std.StringHashMap([]const u8);
 
@@ -8,63 +9,160 @@ const Authenticator = zap.Auth.UserPassSession(
     false, // set true if userpass map changes at runtime
 );
 
+const ADMIN_password = "admin";
+const ADMIN_username = "admin";
+
 const loginpath = "/login";
+const login_file_path = "public/login.html";
+const admin_path = "/admin";
+const public_folder_path = "public";
 
+var allocator: std.mem.Allocator = undefined;
 var authenticator: Authenticator = undefined;
-
 fn on_request(r: zap.Request) !void {
+    const path = r.path orelse "/";
+
+    // Public homepage
+    if (std.mem.eql(u8, path, "/")) {
+        try r.setContentType(.HTML);
+        return try r.sendFile("public/index.html");
+    }
+
+    // Login page: DO NOT authenticate this route.
+    // UserPassSession always lets loginPage through.
+    if (std.mem.eql(u8, path, loginpath)) {
+        return try serve_login(r);
+    }
+
+    // Protected admin
+    if (std.mem.startsWith(u8, path, admin_path)) {
+        return try on_admin_req(r);
+    }
+
+    // Other public routes
+    return try on_public_req(r);
+}
+
+fn on_admin_req(r: zap.Request) !void {
     switch (authenticator.authenticateRequest(&r)) {
         .Handled => {
             // Authenticator handled redirect/login/session logic.
             return;
         },
-
-        .AuthFailed => unreachable,
-
-        .AuthOK => {
-            const path = r.path orelse "/";
-
-            if (std.mem.startsWith(u8, path, loginpath)) {
-                // serve page
-            }
-
-            if (std.mem.startsWith(u8, path, "/logout")) {
-                // serve page;
-            }
-
-            return; // serve page
+        .AuthFailed => unreachable, //This Authenticator never return this
+        .AuthOK => { // Logged in
+            dispatch_admin(r) catch |err| {
+                log.err("dispatch failed: {}\n", .{err});
+                return err;
+            };
         },
     }
 }
-fn dispatch_routes(r: zap.Request) !void {
+
+fn dispatch_admin(r: zap.Request) !void {
+    errdefer {
+        r.setStatus(.not_found);
+        r.sendBody("404 Not Found") catch {};
+    }
+    const full_path = r.path orelse "/";
+
+    const sub_path = full_path[admin_path.len..];
+
+    // After successful login from form action="/admin"
+    if (sub_path.len == 0 or std.mem.eql(u8, sub_path, "/")) {
+        return try r.redirectTo("/admin/dashboard", .found);
+    }
+
+    if (admin_routes.get(sub_path)) |handler| {
+        return try handler(r);
+    }
+
+    if (std.mem.indexOf(u8, sub_path, "..") != null) {
+        r.setStatus(.forbidden);
+        return try r.sendBody("403 Forbidden");
+    }
+
+    var path: []u8 = undefined;
+    if (std.mem.indexOf(u8, sub_path, ".") != null) {
+        path = try std.mem.concat(allocator, u8, &.{ "admin", sub_path });
+    } else {
+        path = try std.mem.concat(allocator, u8, &.{ "admin", sub_path, ".html" });
+    }
+
+    try r.sendFile(path);
+}
+
+fn on_public_req(r: zap.Request) !void {
     // dispatch
     if (r.path) |the_path| {
-        if (routes.get(the_path)) |foo| {
+        if (public_routes.get(the_path)) |foo| {
             try foo(r);
             return;
         }
     }
-    // or default: present menu
-    try r.sendBody();
+    r.setStatus(.not_found);
+    try r.sendBody("404 Not Found");
 }
 
-fn handle_login(r: zap.Request) !void {
-    _ = r;
+fn serve_login(r: zap.Request) !void {
+    try r.setContentType(.HTML);
+    try r.sendFile(login_file_path);
 }
 
 fn setup_routes(a: std.mem.Allocator) !void {
-    routes = std.StringHashMap(zap.HttpRequestFn).init(a);
-    try routes.put("/login", handle_login);
+    try setup_public_routes(a);
+    try setup_admin_routes(a);
 }
 
-var routes: std.StringHashMap(zap.HttpRequestFn) = undefined;
+fn setup_public_routes(a: std.mem.Allocator) !void {
+    public_routes = std.StringHashMap(zap.HttpRequestFn).init(a);
+}
 
-pub fn main() !void {
+fn setup_admin_routes(a: std.mem.Allocator) !void {
+    admin_routes = std.StringHashMap(zap.HttpRequestFn).init(a);
+}
+
+var public_routes: std.StringHashMap(zap.HttpRequestFn) = undefined;
+var admin_routes: std.StringHashMap(zap.HttpRequestFn) = undefined;
+
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+
+    var gpa = std.heap.DebugAllocator(.{
+        .thread_safe = true,
+    }){};
+
+    defer {
+        if (gpa.detectLeaks() != 0) @panic("detected leaks");
+    }
+
+    allocator = gpa.allocator();
+
+    var userpass = Lookup.init(allocator);
+    defer userpass.deinit();
+
+    try userpass.put(ADMIN_username, ADMIN_password);
+
+    authenticator = try Authenticator.init(
+        io,
+        allocator,
+        &userpass,
+        .{
+            .usernameParam = "username",
+            .passwordParam = "password",
+            .loginPage = loginpath,
+            .cookieName = "zap-session",
+        },
+    );
+    defer authenticator.deinit();
     try setup_routes(std.heap.page_allocator);
+
+    log.info("setup\n", .{});
     var listener = zap.HttpListener.init(.{
         .port = 3000,
-        .on_request = dispatch_routes,
+        .on_request = on_request,
         .log = true,
+        .public_folder = public_folder_path,
     });
     try listener.listen();
 
