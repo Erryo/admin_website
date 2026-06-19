@@ -13,19 +13,17 @@ const ADMIN_password = "admin";
 const ADMIN_username = "admin";
 
 const loginpath = "/login";
-const login_file_path = "public/login.html";
+const login_file_path = "static/login.html";
 const admin_path = "/admin";
-const public_folder_path = "public";
 
 var allocator: std.mem.Allocator = undefined;
 var authenticator: Authenticator = undefined;
 fn on_request(r: zap.Request) !void {
     const path = r.path orelse "/";
 
-    // Public homepage
     if (std.mem.eql(u8, path, "/")) {
         try r.setContentType(.HTML);
-        return try r.sendFile("public/index.html");
+        return try r.sendFile("static/index.html");
     }
 
     // Login page: DO NOT authenticate this route.
@@ -38,9 +36,6 @@ fn on_request(r: zap.Request) !void {
     if (std.mem.startsWith(u8, path, admin_path)) {
         return try on_admin_req(r);
     }
-
-    // Other public routes
-    return try on_public_req(r);
 }
 
 fn on_admin_req(r: zap.Request) !void {
@@ -84,24 +79,12 @@ fn dispatch_admin(r: zap.Request) !void {
 
     var path: []u8 = undefined;
     if (std.mem.indexOf(u8, sub_path, ".") != null) {
-        path = try std.mem.concat(allocator, u8, &.{ "admin", sub_path });
+        path = try std.mem.concat(allocator, u8, &.{ "static", sub_path });
     } else {
-        path = try std.mem.concat(allocator, u8, &.{ "admin", sub_path, ".html" });
+        path = try std.mem.concat(allocator, u8, &.{ "static", sub_path, ".html" });
     }
 
     try r.sendFile(path);
-}
-
-fn on_public_req(r: zap.Request) !void {
-    // dispatch
-    if (r.path) |the_path| {
-        if (public_routes.get(the_path)) |foo| {
-            try foo(r);
-            return;
-        }
-    }
-    r.setStatus(.not_found);
-    try r.sendBody("404 Not Found");
 }
 
 fn serve_login(r: zap.Request) !void {
@@ -110,19 +93,9 @@ fn serve_login(r: zap.Request) !void {
 }
 
 fn setup_routes(a: std.mem.Allocator) !void {
-    try setup_public_routes(a);
-    try setup_admin_routes(a);
-}
-
-fn setup_public_routes(a: std.mem.Allocator) !void {
-    public_routes = std.StringHashMap(zap.HttpRequestFn).init(a);
-}
-
-fn setup_admin_routes(a: std.mem.Allocator) !void {
     admin_routes = std.StringHashMap(zap.HttpRequestFn).init(a);
 }
 
-var public_routes: std.StringHashMap(zap.HttpRequestFn) = undefined;
 var admin_routes: std.StringHashMap(zap.HttpRequestFn) = undefined;
 
 pub fn main(init: std.process.Init) !void {
@@ -162,7 +135,6 @@ pub fn main(init: std.process.Init) !void {
         .port = 3000,
         .on_request = on_request,
         .log = true,
-        .public_folder = public_folder_path,
     });
     try listener.listen();
 
