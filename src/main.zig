@@ -2,13 +2,6 @@ const std = @import("std");
 const zap = @import("zap");
 const log = std.log;
 
-const Lookup = std.StringHashMap([]const u8);
-
-const Authenticator = zap.Auth.UserPassSession(
-    Lookup,
-    false, // set true if userpass map changes at runtime
-);
-
 const ADMIN_password = "admin";
 const ADMIN_username = "admin";
 
@@ -17,17 +10,15 @@ const login_file_path = "static/login.html";
 const admin_path = "/admin";
 
 var allocator: std.mem.Allocator = undefined;
-var authenticator: Authenticator = undefined;
 fn on_request(r: zap.Request) !void {
     const path = r.path orelse "/";
+    r.parseCookies(false);
 
     if (std.mem.eql(u8, path, "/")) {
         try r.setContentType(.HTML);
         return try r.sendFile("static/index.html");
     }
 
-    // Login page: DO NOT authenticate this route.
-    // UserPassSession always lets loginPage through.
     if (std.mem.eql(u8, path, loginpath)) {
         return try serve_login(r);
     }
@@ -39,19 +30,15 @@ fn on_request(r: zap.Request) !void {
 }
 
 fn on_admin_req(r: zap.Request) !void {
-    switch (authenticator.authenticateRequest(&r)) {
-        .Handled => {
-            // Authenticator handled redirect/login/session logic.
-            return;
-        },
-        .AuthFailed => unreachable, //This Authenticator never return this
-        .AuthOK => { // Logged in
-            dispatch_admin(r) catch |err| {
-                log.err("dispatch failed: {}\n", .{err});
-                return err;
-            };
-        },
+    if (try check_authed(r) == false) {
+        try r.redirectTo("/login", .found);
+        return;
     }
+
+    dispatch_admin(r) catch |err| {
+        log.err("dispatch failed: {}\n", .{err});
+        return err;
+    };
 }
 
 fn dispatch_admin(r: zap.Request) !void {
@@ -87,9 +74,54 @@ fn dispatch_admin(r: zap.Request) !void {
     try r.sendFile(path);
 }
 
+fn check_authed(r: zap.Request) !bool {
+    r.parseCookies(false);
+    if (r.getCookiesCount() == 0) return false;
+    const auth_cookie = try r.getCookieStr(allocator, "auth") orelse return false;
+    defer allocator.free(auth_cookie);
+    return true;
+}
+
 fn serve_login(r: zap.Request) !void {
-    try r.setContentType(.HTML);
-    try r.sendFile(login_file_path);
+    if (r.methodAsEnum() == .POST) {
+        try get_login(r);
+    } else {
+        if (try check_authed(r)) {
+            try r.redirectTo("/admin/", .found);
+            return;
+        }
+        try r.setContentType(.HTML);
+        try r.sendFile(login_file_path);
+    }
+}
+
+fn get_login(r: zap.Request) !void {
+    if (r.methodAsEnum() != .POST)
+        return try r.sendBody("403 Forbidden");
+
+    try r.parseBody();
+    r.parseQuery();
+    const param_count = r.getParamCount();
+    log.info("param_count:{d}", .{param_count});
+    if (param_count == 0) {
+        return try r.sendBody("403 Forbidden");
+    }
+
+    const password_str = try r.getParamStr(allocator, "password") orelse {
+        return try r.sendBody("403 Forbidden <br> <b> No password  </b>");
+    };
+    defer allocator.free(password_str);
+    const username_str = try r.getParamStr(allocator, "username") orelse {
+        return try r.sendBody("403 Forbidden <br> <b> No username  </b>");
+    };
+    defer allocator.free(username_str);
+    log.info("username:{s} password:{s}", .{ username_str, password_str });
+
+    if (std.mem.eql(u8, password_str, ADMIN_password) and std.mem.eql(u8, username_str, ADMIN_username)) {
+        try r.setCookie(.{ .name = "auth", .value = "sig", .http_only = true, .secure = true, .path = "/" });
+    }
+
+    return r.redirectTo("/admin/", .found);
 }
 
 fn setup_routes(a: std.mem.Allocator) !void {
@@ -100,6 +132,7 @@ var admin_routes: std.StringHashMap(zap.HttpRequestFn) = undefined;
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
+    _ = io;
 
     var gpa = std.heap.DebugAllocator(.{
         .thread_safe = true,
@@ -111,23 +144,6 @@ pub fn main(init: std.process.Init) !void {
 
     allocator = gpa.allocator();
 
-    var userpass = Lookup.init(allocator);
-    defer userpass.deinit();
-
-    try userpass.put(ADMIN_username, ADMIN_password);
-
-    authenticator = try Authenticator.init(
-        io,
-        allocator,
-        &userpass,
-        .{
-            .usernameParam = "username",
-            .passwordParam = "password",
-            .loginPage = loginpath,
-            .cookieName = "zap-session",
-        },
-    );
-    defer authenticator.deinit();
     try setup_routes(std.heap.page_allocator);
 
     log.info("setup\n", .{});
