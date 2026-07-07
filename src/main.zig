@@ -62,7 +62,6 @@ fn make_jwt(new_val: bool) ![]const u8 {
 
 fn verify(data: []const u8) !bool {
     if (current_id == null) {
-        log.info("current_id is null \n", .{});
         return false;
     }
     var iter = std.mem.splitAny(u8, data, ".");
@@ -81,7 +80,6 @@ fn verify(data: []const u8) !bool {
     }
 
     if (header == null or body == null or signature == null) {
-        log.info("headr/bdy/sig is null: h:{},b:{},s:{}\n", .{ header == null, body == null, signature == null });
         return false;
     }
 
@@ -101,7 +99,6 @@ fn verify(data: []const u8) !bool {
     const sig_b64 = try encode_b64url(&calc_signature);
     defer allocator.free(sig_b64);
 
-    std.log.info("\n\n\tsoll: {s} \tist:{s}\n", .{ sig_b64, signature.? });
     if (!std.mem.eql(u8, sig_b64, signature.?)) return false;
 
     return true;
@@ -203,7 +200,6 @@ fn check_authed(r: zap.Request) !bool {
     const auth_cookie = try r.getCookieStr(allocator, "auth") orelse return false;
     defer allocator.free(auth_cookie);
     const passed = try verify(auth_cookie);
-    log.info("check:{}\n", .{passed});
     return passed;
 }
 
@@ -227,7 +223,6 @@ fn get_login(r: zap.Request) !void {
     try r.parseBody();
     r.parseQuery();
     const param_count = r.getParamCount();
-    log.info("param_count:{d}", .{param_count});
     if (param_count == 0) {
         return try r.sendBody("403 Forbidden");
     }
