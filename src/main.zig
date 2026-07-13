@@ -28,7 +28,7 @@ const db_query_uri = "http://192.168.2.200:8086/api/v2/query?org=" ++ INFLUXDB_O
 const INFLUXDB_ORG = "217abbc7657c82a3";
 const INFLUXDB_BUCKET = "sensors";
 const test_req =
-    \\ from(bucket: "{s}") |> range(start: -{d}h) |> filter(fn: (r) |> mean() => r._measurement == "{s}")
+    \\ from(bucket: "{s}") |> range(start: -{d}h) |> filter(fn: (r)  => r._measurement == "{s}")
 ;
 
 var current_id: ?[128:0]u8 = null;
@@ -48,7 +48,7 @@ fn db_test() !void {
     });
     defer req.deinit();
 
-    const req_body = try std.fmt.allocPrint(allocator, test_req, .{ INFLUXDB_BUCKET, 1, "plant_sensor" });
+    const req_body = try std.fmt.allocPrint(allocator, test_req, .{ INFLUXDB_BUCKET, 12, "plant_sensor" });
     defer allocator.free(req_body);
     print("formatted:{s}\n", .{req_body});
 
@@ -57,8 +57,6 @@ fn db_test() !void {
     var buf: [1024]u8 = undefined;
     var response = try req.receiveHead(&buf);
 
-    // Occasionally, httpbin might time out, so we disregard cases
-    // where the response status is not okay.
     if (response.head.status != .ok) {
         return;
     }
@@ -67,6 +65,14 @@ fn db_test() !void {
     defer allocator.free(body);
 
     print("Body:\n{s}\n", .{body});
+    var fd = try std.Io.Dir.cwd().createFile(io, "data", .{ .truncate = true });
+    defer fd.close(io);
+
+    var buf_fd: [1024]u8 = undefined;
+    var wr = fd.writer(io, &buf_fd);
+    try wr.flush();
+    const writer = wr.interface;
+    try writer.writeAll(body);
 }
 
 // user needs to free returned slice
