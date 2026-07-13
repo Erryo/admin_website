@@ -69,9 +69,7 @@ fn db_test() !void {
     var fd = try std.Io.Dir.cwd().createFile(io.?, "data", .{ .truncate = true });
     defer fd.close(io.?);
 
-    var writer = fd.writer(io.?, &.{}).interface;
-    try writer.writeAll(body);
-    try writer.flush();
+    try fd.writePositionalAll(io.?, body, 0);
 }
 
 // user needs to free returned slice
