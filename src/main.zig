@@ -1,6 +1,8 @@
 const std = @import("std");
 const zap = @import("zap");
 const log = std.log;
+const Client = std.http.Client;
+const print = std.log.info;
 
 const ADMIN_password = "admin";
 const ADMIN_username = "admin";
@@ -21,9 +23,52 @@ const JWT_HEADER_ascii =
 ;
 
 const JWT_HEADER_b64url = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9";
+const INFLUXDB_TOKEN = "s5nuqgtApPwTo86CwrShXbcJ--uWumi-WAZY8OORtHhKc8XCj0NMwaDy_JhfXlEjGxjair_kZPolQ3DiU8AfmA==";
+const db_query_uri = "http://192.168.2.200:8086/api/v2/query/?org=" ++ INFLUXDB_ORG;
+const INFLUXDB_ORG = "217abbc7657c82a3";
+const INFLUXDB_BUCKET = "sensors";
+const test_req =
+    \\ from(bucket: "{s}") |>
+    \\ range(start: -{d}h) |>
+    \\ filter(fn: (r) =>
+    \\ r._measurement == "{s}")
+;
+
 var current_id: ?[128:0]u8 = null;
 var allocator: std.mem.Allocator = undefined;
 var io: ?std.Io = null;
+var db_parsed_query_uri = std.Uri.parse(db_query_uri) catch |err| @panic(err);
+var db_client: ?Client = null;
+
+fn db_test() !void {
+    if (db_client == null) {
+        if (io != null) {
+            db_client = Client{ .allocator = allocator, .io = io.? };
+        } else return error.NotInitted;
+    }
+    var req = try db_client.?.request(.GET, db_parsed_query_uri, .{
+        .extra_headers = &.{ .{ .name = "Content-Type", .value = "application/vnd.flux" }, .{ .name = "Authorization", .value = INFLUXDB_TOKEN } },
+    });
+    defer req.deinit();
+
+    const buff = try std.fmt.allocPrint(allocator, test_req, .{ INFLUXDB_BUCKET, -4, "plant_sensor" });
+    defer allocator.free(buff);
+
+    try req.sendBody(buff);
+
+    var redirect_buffer: [1024]u8 = undefined;
+    var response = try req.receiveHead(&redirect_buffer);
+    var iter = response.head.iterateHeaders();
+    while (iter.next()) |header| {
+        std.debug.print("Name:{s}, Value:{s}\n", .{ header.name, header.value });
+    }
+
+    try std.testing.expectEqual(response.head.status, .ok);
+    const body = try response.reader(&.{}).allocRemaining(allocator, .unlimited);
+    defer allocator.free(body);
+
+    print("Body:\n{s}\n", .{body});
+}
 
 // user needs to free returned slice
 fn encode_b64url(data: []const u8) ![]const u8 {
@@ -265,6 +310,9 @@ pub fn main(init: std.process.Init) !void {
 
     allocator = gpa.allocator();
 
+    db_client = Client{ .allocator = allocator, .io = io };
+    defer db_client.?.deinit();
+
     try setup_routes(std.heap.page_allocator);
 
     log.info("setup\n", .{});
@@ -276,6 +324,8 @@ pub fn main(init: std.process.Init) !void {
     try listener.listen();
 
     std.debug.print("Listening on 0.0.0.0:3000\n", .{});
+
+    try db_test();
 
     zap.start(.{
         .threads = 2,
