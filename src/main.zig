@@ -54,7 +54,8 @@ fn db_test() !void {
     const buff = try std.fmt.allocPrint(allocator, test_req, .{ INFLUXDB_BUCKET, -4, "plant_sensor" });
     defer allocator.free(buff);
 
-    try req.sendBody(buff);
+    var bw = try req.sendBody(buff);
+    try bw.flush();
 
     var redirect_buffer: [1024]u8 = undefined;
     var response = try req.receiveHead(&redirect_buffer);
@@ -310,7 +311,7 @@ pub fn main(init: std.process.Init) !void {
 
     allocator = gpa.allocator();
 
-    db_client = Client{ .allocator = allocator, .io = io };
+    db_client = Client{ .allocator = allocator, .io = io.? };
     defer db_client.?.deinit();
 
     try setup_routes(std.heap.page_allocator);
