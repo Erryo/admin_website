@@ -70,8 +70,7 @@ fn db_test() !void {
     defer fd.close(io.?);
 
     var buf_fd: [1024]u8 = undefined;
-    const wr = fd.writer(io.?, &buf_fd);
-    var writer = wr.interface;
+    var writer = fd.writer(io.?, &buf_fd).interface;
     try writer.writeAll(body);
     try writer.flush();
 }
