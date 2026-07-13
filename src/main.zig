@@ -65,14 +65,15 @@ fn db_test() !void {
     defer allocator.free(body);
 
     print("Body:\n{s}\n", .{body});
+
     var fd = try std.Io.Dir.cwd().createFile(io.?, "data", .{ .truncate = true });
     defer fd.close(io.?);
 
     var buf_fd: [1024]u8 = undefined;
-    var wr = fd.writer(io.?, &buf_fd);
-    try wr.flush();
+    const wr = fd.writer(io.?, &buf_fd);
     var writer = wr.interface;
     try writer.writeAll(body);
+    try writer.flush();
 }
 
 // user needs to free returned slice
