@@ -24,11 +24,11 @@ const JWT_HEADER_ascii =
 
 const JWT_HEADER_b64url = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9";
 const INFLUXDB_TOKEN = "s5nuqgtApPwTo86CwrShXbcJ--uWumi-WAZY8OORtHhKc8XCj0NMwaDy_JhfXlEjGxjair_kZPolQ3DiU8AfmA==";
-const db_query_uri = "https://192.168.2.200:8086/api/v2/query/?org=" ++ INFLUXDB_ORG;
+const db_query_uri = "http://192.168.2.200:8086/api/v2/query?org=" ++ INFLUXDB_ORG;
 const INFLUXDB_ORG = "217abbc7657c82a3";
 const INFLUXDB_BUCKET = "sensors";
 const test_req =
-    \\ from(bucket: "{s}") |> range(start: -{d}h) |> filter(fn: (r) => r._measurement == "{s}")
+    \\ from(bucket: "{s}") |> range(start: -{d}h) |> filter(fn: (r) |> mean() => r._measurement == "{s}")
 ;
 
 var current_id: ?[128:0]u8 = null;
@@ -48,7 +48,7 @@ fn db_test() !void {
     });
     defer req.deinit();
 
-    const req_body = try std.fmt.allocPrint(allocator, test_req, .{ INFLUXDB_BUCKET, 4, "plant_sensor" });
+    const req_body = try std.fmt.allocPrint(allocator, test_req, .{ INFLUXDB_BUCKET, 1, "plant_sensor" });
     defer allocator.free(req_body);
     print("formatted:{s}\n", .{req_body});
 
