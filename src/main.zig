@@ -64,13 +64,12 @@ fn db_test() !void {
     const body = try response.reader(&.{}).allocRemaining(allocator, .unlimited);
     defer allocator.free(body);
 
-    print("Body:\n{s}\n", .{body});
+    print("Body:\n{d}\n", .{body.len});
 
     var fd = try std.Io.Dir.cwd().createFile(io.?, "data", .{ .truncate = true });
     defer fd.close(io.?);
 
-    var buf_fd: [1024]u8 = undefined;
-    var writer = fd.writer(io.?, &buf_fd).interface;
+    var writer = fd.writer(io.?, &.{}).interface;
     try writer.writeAll(body);
     try writer.flush();
 }
