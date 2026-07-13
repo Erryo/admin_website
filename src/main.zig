@@ -46,12 +46,12 @@ fn db_test() !void {
             db_client = Client{ .allocator = allocator, .io = io.? };
         } else return error.NotInitted;
     }
-    var req = try db_client.?.request(.GET, db_parsed_query_uri, .{
+    var req = try db_client.?.request(.POST, db_parsed_query_uri, .{
         .extra_headers = &.{ .{ .name = "Content-Type", .value = "application/vnd.flux" }, .{ .name = "Authorization", .value = INFLUXDB_TOKEN } },
     });
     defer req.deinit();
 
-    const req_body = try std.fmt.allocPrint(allocator, test_req, .{ INFLUXDB_BUCKET, -4, "plant_sensor" });
+    const req_body = try std.fmt.allocPrint(allocator, test_req, .{ INFLUXDB_BUCKET, 4, "plant_sensor" });
     defer allocator.free(req_body);
     print("formatted:{s}\n", .{req_body});
 
